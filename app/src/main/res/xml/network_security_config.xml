@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 与 iOS WebSocketService 一致：ws://120.79.156.134:8081 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">120.79.156.134</domain>
+        <domain includeSubdomains="false">120.24.162.199</domain>
+    </domain-config>
+</network-security-config>

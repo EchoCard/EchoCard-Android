@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">EchoCardAI代接卡</string>
+    <string name="call_foreground_channel_name">通话</string>
+    <string name="call_foreground_channel_desc">代接通话进行中，保持蓝牙与网络连接</string>
+    <string name="call_foreground_notification_title">通话进行中</string>
+    <string name="call_foreground_notification_text">EchoCard 正在保持蓝牙与云端连接（降低后台卡顿）</string>
+</resources>
