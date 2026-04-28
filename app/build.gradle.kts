@@ -99,7 +99,7 @@ android {
 // URL injection — read from local.properties or environment variables
 // (loaded after the android {} block so we can access rootProject safely)
 android.defaultConfig.apply {
-    val localProps = java.util.Properties()
+    val localProps = Properties()
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { localProps.load(it) }
     fun envOrProp(envKey: String, propKey: String, default: String) =
         System.getenv(envKey) ?: localProps.getProperty(propKey) ?: default
@@ -115,7 +115,14 @@ android.defaultConfig.apply {
 }
 
 dependencies {
-    implementation(files("libs/callmate-ble-0.1.0.aar"))
+    val useLocalBle =
+        rootProject.rootDir.resolve("../android-ble/build.gradle.kts").exists()
+
+    if (useLocalBle) {
+        implementation("com.vaca.callmate:callmate-ble:0.1.0")
+    } else {
+        implementation(files("libs/callmate-ble-0.1.0.aar"))
+    }
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
