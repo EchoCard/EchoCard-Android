@@ -17,6 +17,8 @@ EchoCard 的 Android 客户二次开发仓。
 
 默认情况下，没有 release 签名材料也可以完成 debug 构建。BLE 库已作为本地 AAR 内置，无需额外配置。
 
+**复合构建 `android-ble`（使用仓库内 `../android-ble` 源码时）**：Gradle 通过 `includeBuild` 单独配置子工程，**需要在 `android-ble/local.properties` 中写入 `sdk.dir=...`**（与 `android/local.properties` 相同，指向本机 Android SDK）。该文件已列入 `android-ble/.gitignore`，需各自本机维护。
+
 ## 文档
 
 - `docs/ANDROID_SECONDARY_DEVELOPMENT_GUIDE.md`

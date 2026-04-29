@@ -37,6 +37,8 @@ private object Keys {
     /** 与 iOS `@AppStorage("callmate.ai_calls_total")` 对齐 */
     val AI_CALLS_TOTAL = intPreferencesKey("callmate.ai_calls_total")
     val USER_APPELLATION = stringPreferencesKey("callmate.userAppellation")
+    /** 与 iOS / update_config v1 `template_vars.greeting` 对齐：用户偏好开场白 */
+    val USER_GREETING = stringPreferencesKey("callmate.userGreeting")
     /** 与 iOS `WebSocketService.ws_avatar_send_prompt_enabled` 一致；默认 false 不在 hello 里带长 prompt */
     val WS_AVATAR_SEND_PROMPT = booleanPreferencesKey("ws_avatar_send_prompt_enabled")
     /** 与 iOS `isInitConfigSendPromptEnabled()` 一致：键未设置时默认 false（init_config hello 不传 prompt） */
@@ -114,6 +116,11 @@ class AppPreferences(private val context: Context) {
 
     val userAppellationFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[Keys.USER_APPELLATION].orEmpty()
+    }
+
+    /** 与 update_config v1 `template_vars.greeting` 对齐 */
+    val userGreetingFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[Keys.USER_GREETING].orEmpty()
     }
 
     /** 与 iOS `isAvatarSendPromptEnabled()` 一致：未设置时默认 false */
@@ -230,6 +237,13 @@ class AppPreferences(private val context: Context) {
         context.dataStore.edit {
             if (value.isNullOrBlank()) it.remove(Keys.USER_APPELLATION)
             else it[Keys.USER_APPELLATION] = value.trim()
+        }
+    }
+
+    suspend fun setUserGreeting(value: String?) {
+        context.dataStore.edit {
+            if (value.isNullOrBlank()) it.remove(Keys.USER_GREETING)
+            else it[Keys.USER_GREETING] = value.trim()
         }
     }
 

@@ -11,10 +11,14 @@ import com.vaca.callmate.data.MessageSender
 import com.vaca.callmate.data.local.OutboundPromptTemplateEntity
 import com.vaca.callmate.data.outbound.OutboundContact
 import com.vaca.callmate.data.outbound.OutboundCreateTaskSubmission
+import com.vaca.callmate.data.outbound.OutboundTask
+import com.vaca.callmate.data.outbound.OutboundDialRiskControl
+import com.vaca.callmate.data.outbound.OutboundTaskJsonStore
 import com.vaca.callmate.data.outbound.OutboundTaskStatus
 import com.vaca.callmate.data.ProcessStrategyChange
 import com.vaca.callmate.data.ProcessStrategyStore
 import com.vaca.callmate.data.repository.OutboundRepository
+import com.vaca.callmate.data.repository.OutboundTemplateLookup
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,6 +44,7 @@ import org.json.JSONObject
 import com.vaca.callmate.BuildConfig
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
@@ -70,6 +75,14 @@ enum class ManualWsScene {
             EVALUATION -> "evaluation"
         }
 }
+
+/** update_config v1：在 connect IO 阶段预取，供 [OutboundChatController.sendHello] 使用 */
+private data class UpdateConfigHelloExtras(
+    val greeting: String?,
+    val strategyManifest: JSONArray?,
+    /** null = 不传 `templateManifest` 键；非 null = 已开通外呼灰度（可为空数组） */
+    val templateManifest: JSONArray?,
+)
 private const val PROTOCOL_VERSION = "1"
 
 enum class OutboundChatConnectionState {
@@ -389,21 +402,40 @@ class OutboundChatController(
         BackendAuthManager.reportDevice(preferences, deviceId, wsBluetoothId, token)
 
         val processStrategyJson = ProcessStrategyStore.processStrategyJSONString(context)
-        val sendAvatarPrompt = preferences.avatarSendPromptEnabledFlow.first()
         val sendInitConfigPrompt = preferences.initConfigSendPromptEnabledFlow.first()
+        val sendAvatarPromptEval = preferences.avatarSendPromptEnabledFlow.first()
         val promptForHello: String = when (wsScene) {
             ManualWsScene.OUTBOUND_CHAT -> loadScenePrompt().orEmpty()
             ManualWsScene.INIT_CONFIG ->
                 if (sendInitConfigPrompt) loadScenePrompt().orEmpty() else ""
             ManualWsScene.AI_AVATAR_UPDATE_CONFIG ->
-                if (sendAvatarPrompt) loadScenePrompt().orEmpty() else ""
+                // v1：update_config 完全服务端托管 prompt，不再下发本地 assets
+                ""
             ManualWsScene.EVALUATION ->
-                if (sendAvatarPrompt) loadEvaluationPrompt().orEmpty() else ""
+                if (sendAvatarPromptEval) loadEvaluationPrompt().orEmpty() else ""
         }
+        val updateConfigHelloExtras: UpdateConfigHelloExtras? =
+            if (wsScene == ManualWsScene.AI_AVATAR_UPDATE_CONFIG) {
+                val greeting = preferences.userGreetingFlow.first().trim().takeIf { it.isNotEmpty() }
+                val strategyManifest = ProcessStrategyStore.strategyManifestJsonArray(context)
+                val outboundEntitled = preferences.aiCallsTotalFlow.first() > 0
+                val templateManifest: JSONArray? = if (outboundEntitled) {
+                    outboundRepository.buildTemplateManifestJsonArray()
+                } else {
+                    null
+                }
+                UpdateConfigHelloExtras(
+                    greeting = greeting,
+                    strategyManifest = strategyManifest,
+                    templateManifest = templateManifest,
+                )
+            } else {
+                null
+            }
         Log.i(
             TAG,
             "[diag] hello prep inv=$inv scene=${wsScene.serverScene} sendInitConfigPrompt=$sendInitConfigPrompt " +
-                "sendAvatarPrompt=$sendAvatarPrompt promptLen=${promptForHello.length} " +
+                "sendAvatarPromptEval=$sendAvatarPromptEval promptLen=${promptForHello.length} " +
                 "strategyJsonLen=${processStrategyJson?.length ?: 0} seedInitConfig=${initConfigMessagesSeed != null}"
         )
 
@@ -484,9 +516,14 @@ class OutboundChatController(
                     )
                     helloRetryJob?.cancel()
                     helloAcked = false
-                    sendHello(promptForHello, appellation, processStrategyJson, webSocket)
+                    sendHello(promptForHello, appellation, processStrategyJson, updateConfigHelloExtras, webSocket)
                     scope.launch(Dispatchers.Main) {
-                        scheduleHelloRetriesRemaining(promptForHello, appellation, processStrategyJson)
+                        scheduleHelloRetriesRemaining(
+                            promptForHello,
+                            appellation,
+                            processStrategyJson,
+                            updateConfigHelloExtras,
+                        )
                     }
                 }
 
@@ -547,12 +584,17 @@ class OutboundChatController(
     }
 
     /** 首次 hello 已在 [WebSocketListener.onOpen] 同步发出；此处仅第 2、3 次重试（与 iOS 共 3 次尝试）。 */
-    private fun scheduleHelloRetriesRemaining(prompt: String, appellation: String?, processStrategyJson: String?) {
+    private fun scheduleHelloRetriesRemaining(
+        prompt: String,
+        appellation: String?,
+        processStrategyJson: String?,
+        updateConfigHelloExtras: UpdateConfigHelloExtras?,
+    ) {
         helloRetryJob = scope.launch(Dispatchers.Main) {
             repeat(2) {
                 delay(1000)
                 if (helloAcked) return@launch
-                sendHello(prompt, appellation, processStrategyJson, null)
+                sendHello(prompt, appellation, processStrategyJson, updateConfigHelloExtras, null)
             }
             if (!helloAcked) {
                 Log.w(TAG, "[connect] hello retry exhausted (3x) scene=${wsScene.serverScene} — Error+stop")
@@ -569,7 +611,8 @@ class OutboundChatController(
         prompt: String,
         appellation: String?,
         processStrategyJson: String?,
-        wsOverride: WebSocket? = null
+        updateConfigHelloExtras: UpdateConfigHelloExtras? = null,
+        wsOverride: WebSocket? = null,
     ) {
         val ws = wsOverride ?: socket ?: return
         val audioParams = JSONObject()
@@ -579,7 +622,8 @@ class OutboundChatController(
             .put("frame_duration", 60)
         val initiate = JSONObject()
             .put("scene", wsScene.serverScene)
-        if (prompt.isNotBlank()) {
+        val isUpdateConfigV1 = wsScene == ManualWsScene.AI_AVATAR_UPDATE_CONFIG
+        if (!isUpdateConfigV1 && prompt.isNotBlank()) {
             initiate.put("prompt", prompt)
         }
         val templateVars = JSONObject()
@@ -587,8 +631,20 @@ class OutboundChatController(
         if (!appellation.isNullOrBlank()) {
             templateVars.put("appellation", appellation)
         }
-        if (!processStrategyJson.isNullOrBlank()) {
-            templateVars.put("processStrategy", processStrategyJson)
+        if (isUpdateConfigV1) {
+            val ex = updateConfigHelloExtras
+                ?: UpdateConfigHelloExtras(greeting = null, strategyManifest = null, templateManifest = null)
+            if (!ex.greeting.isNullOrBlank()) {
+                templateVars.put("greeting", ex.greeting)
+            }
+            ex.strategyManifest?.let { templateVars.put("strategyManifest", it) }
+            if (ex.templateManifest != null) {
+                templateVars.put("templateManifest", ex.templateManifest)
+            }
+        } else {
+            if (!processStrategyJson.isNullOrBlank()) {
+                templateVars.put("processStrategy", processStrategyJson)
+            }
         }
         if (wsScene == ManualWsScene.EVALUATION && !evaluationTranscriptTemplate.isNullOrEmpty()) {
             buildChatHistoryTemplateJson(evaluationTranscriptTemplate)?.let { templateVars.put("chatHistory", it) }
@@ -920,6 +976,43 @@ class OutboundChatController(
         return hit?.name
     }
 
+    private fun supportsOutboundToolsScene(): Boolean =
+        wsScene == ManualWsScene.OUTBOUND_CHAT || wsScene == ManualWsScene.AI_AVATAR_UPDATE_CONFIG
+
+    private fun hasPendingOutboundConfirmCard(): Boolean =
+        _outboundConfirmCards.value.values.any { it.status == ProposalCardStatus.Pending }
+
+    private fun isLikelyOutboundPhone(phone: String): Boolean {
+        val digits = phone.filter { it.isDigit() }
+        if (digits.length < 7) return false
+        if (OutboundDialRiskControl.isEmergencyNumber(phone)) return false
+        return true
+    }
+
+    private fun formatIso8601OffsetMillis(millis: Long): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
+        sdf.timeZone = TimeZone.getDefault()
+        return sdf.format(Date(millis))
+    }
+
+    private fun findOutboundScheduleConflict(atMillis: Long): OutboundTask? {
+        val windowMs = 10 * 60_000L
+        return OutboundTaskJsonStore.load(context).firstOrNull { t ->
+            val at = t.scheduledAt ?: return@firstOrNull false
+            t.status == OutboundTaskStatus.Scheduled &&
+                kotlin.math.abs(at - atMillis) < windowMs
+        }
+    }
+
+    private fun formatScheduleConflictError(task: OutboundTask): String {
+        val sdf = SimpleDateFormat("HH:mm", Locale.CHINA)
+        sdf.timeZone = TimeZone.getDefault()
+        val center = checkNotNull(task.scheduledAt)
+        val start = Date(center - 5 * 60_000L)
+        val end = Date(center + 5 * 60_000L)
+        return "与已有定时任务「${task.promptType}」冲突（${sdf.format(start)} - ${sdf.format(end)}）"
+    }
+
     /**
      * 由 UI 在用户点击确认/取消后调用。`confirmed=true` 执行外呼入队（按卡片里的 scheduledAt 分立即/定时）；
      * 失败不移除卡片，而是把状态切到 [ProposalCardStatus.Failed] 并记录原因（与 iOS
@@ -934,8 +1027,11 @@ class OutboundChatController(
             ))
             sendToolResponse(
                 callId,
-                error = rejectionReason
-                    ?: if (language == Language.Zh) "用户取消了拨出" else "User cancelled",
+                JSONObject().apply {
+                    put("success", false)
+                    put("action", "cancelled")
+                    put("reason", "user_cancelled")
+                },
             )
             return
         }
@@ -945,11 +1041,11 @@ class OutboundChatController(
                 withContext(Dispatchers.Main) {
                     _outboundConfirmCards.value = _outboundConfirmCards.value + (callId to state.copy(
                         status = ProposalCardStatus.Failed,
-                        failureMessage = if (language == Language.Zh) "找不到对应话术模板" else "Template not found",
+                        failureMessage = "未找到模板「${state.data.templateName}」",
                     ))
                     sendToolResponse(
                         callId,
-                        error = if (language == Language.Zh) "找不到对应话术模板" else "Template not found",
+                        error = "未找到模板「${state.data.templateName}」",
                     )
                 }
                 return@launch
@@ -978,18 +1074,19 @@ class OutboundChatController(
                         status = ProposalCardStatus.Applied,
                         failureMessage = null,
                     ))
-                    val okMsg = when {
-                        scheduledAt != null -> {
-                            val label = state.data.timeDescription?.takeIf { it.isNotBlank() }
-                                ?: state.data.scheduledAtMillis?.toString()
-                            if (language == Language.Zh) "已安排定时外呼：${label ?: ""}" else "Scheduled: ${label ?: ""}"
-                        }
-                        else -> if (language == Language.Zh) "用户已确认，正在拨出电话" else "Confirmed; dialing"
+                    if (scheduledAt != null) {
+                        sendToolResponse(
+                            callId,
+                            JSONObject()
+                                .put("success", true)
+                                .put("scheduled_at", formatIso8601OffsetMillis(scheduledAt)),
+                        )
+                    } else {
+                        sendToolResponse(
+                            callId,
+                            JSONObject().put("success", true).put("action", "dialing"),
+                        )
                     }
-                    sendToolResponse(
-                        callId,
-                        JSONObject().put("success", true).put("message", okMsg),
-                    )
                 } else {
                     _outboundConfirmCards.value = _outboundConfirmCards.value + (callId to current.copy(
                         status = ProposalCardStatus.Failed,
@@ -1169,10 +1266,9 @@ class OutboundChatController(
                         }
                         ProcessStrategyStore.applyChanges(context, updates)
                         withContext(Dispatchers.Main) {
-                            val message = if (language == Language.Zh) "确认修改" else "Confirm"
                             sendToolResponse(
                                 callId,
-                                JSONObject().put("success", true).put("operation", "confirm").put("message", message)
+                                JSONObject().put("operation", "confirm"),
                             )
                         }
                     }
@@ -1181,12 +1277,17 @@ class OutboundChatController(
                 }
             }
             "save_user_appellation" -> {
-                val raw = arguments["appellation"] as? String ?: return
-                val app = raw.trim()
-                if (app.isNotEmpty()) {
-                    scope.launch {
-                        preferences.setUserAppellation(app)
-                    }
+                val raw = arguments["appellation"] as? String
+                val app = raw?.trim().orEmpty()
+                if (app.isEmpty()) {
+                    sendToolResponse(
+                        callId,
+                        error = if (language == Language.Zh) "称呼为空" else "Appellation empty",
+                    )
+                    return
+                }
+                scope.launch {
+                    preferences.setUserAppellation(app)
                 }
                 sendToolResponse(callId, JSONObject().put("success", true))
             }
@@ -1204,7 +1305,7 @@ class OutboundChatController(
                 }
                 try {
                     val now = System.currentTimeMillis()
-                    outboundRepository.insertOrUpdateTemplate(
+                    val saved = outboundRepository.insertOrUpdateTemplate(
                         OutboundPromptTemplateEntity(
                             id = UUID.randomUUID().toString(),
                             name = templateName.trim(),
@@ -1213,13 +1314,14 @@ class OutboundChatController(
                             updatedAtMillis = now
                         )
                     )
+                    val updatedAtIso = formatIso8601OffsetMillis(saved.updatedAtMillis)
                     withContext(Dispatchers.Main) {
                         sendToolResponse(
                             callId,
-                            JSONObject().put("success", true).put(
-                                "message",
-                                if (language == Language.Zh) "模板\"$templateName\"已保存" else "Template saved"
-                            )
+                            JSONObject()
+                                .put("success", true)
+                                .put("name", saved.name)
+                                .put("updated_at", updatedAtIso),
                         )
                     }
                 } catch (e: Exception) {
@@ -1228,8 +1330,70 @@ class OutboundChatController(
                     }
                 }
             }
+            "load_rules" -> scope.launch(Dispatchers.IO) {
+                val tag = arguments.string("tag")?.trim().orEmpty()
+                if (tag.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        sendToolResponse(
+                            callId,
+                            error = if (language == Language.Zh) "缺少 tag" else "Missing tag",
+                        )
+                    }
+                    return@launch
+                }
+                val rule = ProcessStrategyStore.getRuleContentForLoadRules(context, tag)
+                if (rule == null) {
+                    withContext(Dispatchers.Main) {
+                        sendToolResponse(callId, error = "规则不存在: $tag")
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        sendToolResponse(
+                            callId,
+                            JSONObject()
+                                .put("tag", rule.tag)
+                                .put("name", rule.name)
+                                .put("content", rule.content),
+                        )
+                    }
+                }
+            }
+            "load_template" -> scope.launch(Dispatchers.IO) {
+                val q = arguments.string("name")?.trim().orEmpty()
+                if (q.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        sendToolResponse(
+                            callId,
+                            error = if (language == Language.Zh) "模板名称不能为空" else "Template name required",
+                        )
+                    }
+                    return@launch
+                }
+                when (val hit = outboundRepository.lookupTemplateByName(q)) {
+                    OutboundTemplateLookup.NotFound -> withContext(Dispatchers.Main) {
+                        sendToolResponse(callId, error = "未找到模板「$q」")
+                    }
+                    is OutboundTemplateLookup.Ambiguous -> withContext(Dispatchers.Main) {
+                        val joined = hit.names.joinToString("、")
+                        sendToolResponse(callId, error = "找到多个匹配模板：$joined")
+                    }
+                    is OutboundTemplateLookup.Single -> {
+                        val e = hit.entity
+                        val taskType = OutboundRepository.inferTaskTypeFromTemplateContent(e.content)
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(
+                                callId,
+                                JSONObject()
+                                    .put("name", e.name)
+                                    .put("task_type", taskType)
+                                    .put("content", e.content),
+                            )
+                        }
+                    }
+                }
+            }
             "initiate_call" -> {
-                if (wsScene != ManualWsScene.OUTBOUND_CHAT) {
+                if (!supportsOutboundToolsScene()) {
                     sendToolResponse(
                         callId,
                         error = if (language == Language.Zh) "当前场景不支持外呼工具" else "Not available in this scene"
@@ -1245,10 +1409,40 @@ class OutboundChatController(
                     )
                     return
                 }
-                postOutboundConfirmCard(callId, phone, templateName, scheduledAtMillis = null, timeDescription = null)
+                scope.launch(Dispatchers.IO) {
+                    val pending = withContext(Dispatchers.Main) { hasPendingOutboundConfirmCard() }
+                    if (pending) {
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(callId, error = "已有一通外呼待确认，请先处理")
+                        }
+                        return@launch
+                    }
+                    val template = outboundRepository.findTemplateByName(templateName)
+                    if (template == null) {
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(callId, error = "未找到模板「$templateName」")
+                        }
+                        return@launch
+                    }
+                    if (!isLikelyOutboundPhone(phone)) {
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(callId, error = "号码格式不正确：$phone")
+                        }
+                        return@launch
+                    }
+                    withContext(Dispatchers.Main) {
+                        postOutboundConfirmCard(
+                            callId,
+                            phone,
+                            template.name,
+                            scheduledAtMillis = null,
+                            timeDescription = null,
+                        )
+                    }
+                }
             }
             "schedule_call" -> {
-                if (wsScene != ManualWsScene.OUTBOUND_CHAT) {
+                if (!supportsOutboundToolsScene()) {
                     sendToolResponse(
                         callId,
                         error = if (language == Language.Zh) "当前场景不支持外呼工具" else "Not available in this scene"
@@ -1257,7 +1451,7 @@ class OutboundChatController(
                 }
                 val phone = arguments.string("phone")?.trim().orEmpty()
                 val templateName = arguments.string("template_name")?.trim().orEmpty()
-                val timeDescription = arguments.string("time_description").orEmpty()
+                val timeDescription = arguments.string("time_description").orEmpty().trim()
                 if (phone.isEmpty() || templateName.isEmpty()) {
                     sendToolResponse(
                         callId,
@@ -1265,22 +1459,95 @@ class OutboundChatController(
                     )
                     return
                 }
-                val scheduledAt = parseScheduleTime(arguments)
-                if (scheduledAt == null) {
+                if (timeDescription.isEmpty()) {
                     sendToolResponse(
                         callId,
-                        error = if (language == Language.Zh) "请提供 scheduled_time 或 minutes_from_now" else "Invalid schedule time"
+                        error = if (language == Language.Zh) "缺少 time_description" else "Missing time_description",
                     )
                     return
                 }
-                if (scheduledAt <= System.currentTimeMillis() - 30_000L) {
-                    sendToolResponse(
-                        callId,
-                        error = if (language == Language.Zh) "预定时间已过，请重新指定" else "Time is in the past"
-                    )
-                    return
+                scope.launch(Dispatchers.IO) {
+                    val pending = withContext(Dispatchers.Main) { hasPendingOutboundConfirmCard() }
+                    if (pending) {
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(callId, error = "已有一通外呼待确认，请先处理")
+                        }
+                        return@launch
+                    }
+                    val template = outboundRepository.findTemplateByName(templateName)
+                    if (template == null) {
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(callId, error = "未找到模板「$templateName」")
+                        }
+                        return@launch
+                    }
+                    if (!isLikelyOutboundPhone(phone)) {
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(callId, error = "号码格式不正确：$phone")
+                        }
+                        return@launch
+                    }
+                    val rawIso = arguments.string("scheduled_time")?.trim().orEmpty()
+                    val minutesRaw = arguments["minutes_from_now"]
+                    val scheduledAt: Long = when {
+                        rawIso.isNotEmpty() -> {
+                            val parsed = parseIso8601(rawIso)
+                            if (parsed == null) {
+                                withContext(Dispatchers.Main) {
+                                    sendToolResponse(callId, error = "时间格式无法识别：$rawIso")
+                                }
+                                return@launch
+                            }
+                            parsed
+                        }
+                        minutesRaw != null -> {
+                            val minutes = (minutesRaw as? Number)?.toInt()
+                                ?: (minutesRaw as? String)?.toIntOrNull()
+                            if (minutes == null || minutes <= 0) {
+                                withContext(Dispatchers.Main) {
+                                    sendToolResponse(callId, error = "时间格式无法识别：$minutesRaw")
+                                }
+                                return@launch
+                            }
+                            System.currentTimeMillis() + minutes * 60_000L
+                        }
+                        else -> {
+                            withContext(Dispatchers.Main) {
+                                sendToolResponse(
+                                    callId,
+                                    error = if (language == Language.Zh) {
+                                        "请提供 scheduled_time 或 minutes_from_now"
+                                    } else {
+                                        "Provide scheduled_time or minutes_from_now"
+                                    },
+                                )
+                            }
+                            return@launch
+                        }
+                    }
+                    if (scheduledAt <= System.currentTimeMillis()) {
+                        val label = if (rawIso.isNotEmpty()) rawIso else formatIso8601OffsetMillis(scheduledAt)
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(callId, error = "时间已过：$label")
+                        }
+                        return@launch
+                    }
+                    findOutboundScheduleConflict(scheduledAt)?.let { conflict ->
+                        withContext(Dispatchers.Main) {
+                            sendToolResponse(callId, error = formatScheduleConflictError(conflict))
+                        }
+                        return@launch
+                    }
+                    withContext(Dispatchers.Main) {
+                        postOutboundConfirmCard(
+                            callId,
+                            phone,
+                            template.name,
+                            scheduledAtMillis = scheduledAt,
+                            timeDescription = timeDescription,
+                        )
+                    }
                 }
-                postOutboundConfirmCard(callId, phone, templateName, scheduledAt, timeDescription)
             }
             "display_guide_image" -> {
                 val imageId = arguments.string("image_id")?.trim().orEmpty()
@@ -1335,19 +1602,6 @@ class OutboundChatController(
         }
     }
 
-    private fun parseScheduleTime(arguments: Map<String, Any>): Long? {
-        val iso = arguments.string("scheduled_time")?.trim().orEmpty()
-        if (iso.isNotEmpty()) {
-            parseIso8601(iso)?.let { return it }
-        }
-        val minutes = (arguments["minutes_from_now"] as? Number)?.toInt()
-            ?: (arguments["minutes_from_now"] as? String)?.toIntOrNull()
-        if (minutes != null && minutes > 0) {
-            return System.currentTimeMillis() + minutes * 60_000L
-        }
-        return null
-    }
-
     private fun parseIso8601(raw: String): Long? {
         val t = raw.trim()
         if (t.isEmpty()) return null
@@ -1375,8 +1629,10 @@ class OutboundChatController(
         val o = JSONObject()
             .put("type", "tool_response")
             .put("call_id", callId)
-        if (result != null) o.put("result", result)
-        if (error != null) o.put("error", error)
+        when {
+            error != null -> o.put("error", error)
+            result != null -> o.put("result", result)
+        }
         socket?.send(o.toString())
     }
 
@@ -1391,15 +1647,19 @@ class OutboundChatController(
                 ProcessStrategyStore.applyChanges(context, updates)
             }
             withContext(Dispatchers.Main) {
-                val message = if (operation == "confirm") {
-                    if (language == Language.Zh) "确认修改" else "Confirm"
+                if (operation == "confirm") {
+                    sendToolResponse(callId, JSONObject().put("operation", "confirm"))
                 } else {
-                    if (language == Language.Zh) "取消修改" else "Cancel"
+                    sendToolResponse(
+                        callId,
+                        JSONObject().apply {
+                            put("success", false)
+                            put("action", "cancelled")
+                            put("reason", "user_cancelled")
+                            put("operation", "cancel")
+                        },
+                    )
                 }
-                sendToolResponse(
-                    callId,
-                    JSONObject().put("success", true).put("operation", operation).put("message", message)
-                )
                 if (_pendingRuleChangeForConfirm.value?.id == callId) {
                     _pendingRuleChangeForConfirm.value = null
                 }

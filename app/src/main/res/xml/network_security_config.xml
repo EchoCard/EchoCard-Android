@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- 与 iOS WebSocketService 一致：ws://120.79.156.134:8081 -->
+    <!-- 默认 WS/API 为 wss/https（chat-dev / api-dev），无需明文域。
+         以下仅在 build.gradle / DataStore 覆盖为实验室内网 IP 时需要明文 HTTP/WS。 -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">120.79.156.134</domain>
         <domain includeSubdomains="false">120.24.162.199</domain>

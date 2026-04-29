@@ -104,14 +104,15 @@ android.defaultConfig.apply {
     fun envOrProp(envKey: String, propKey: String, default: String) =
         System.getenv(envKey) ?: localProps.getProperty(propKey) ?: default
 
+    // 默认与 `ios/CallMate/App/AppConfig.swift` 同源（dev）；旧 IP 仅通过 local.properties / 环境变量回退
     buildConfigField("String", "API_BASE_URL",
-        "\"${envOrProp("ECHOCARD_API_BASE_URL", "echocard.api.base.url", "https://echocard.xiaozhi.me")}\"")
+        "\"${envOrProp("ECHOCARD_API_BASE_URL", "echocard.api.base.url", "https://api-dev.echocard.com")}\"")
     buildConfigField("String", "VOICE_API_BASE_URL",
-        "\"${envOrProp("ECHOCARD_VOICE_API_BASE_URL", "echocard.voice.api.base.url", "http://120.79.156.134:8002")}\"")
+        "\"${envOrProp("ECHOCARD_VOICE_API_BASE_URL", "echocard.voice.api.base.url", "https://api-dev.echocard.com")}\"")
     buildConfigField("String", "WS_BASE_URL",
-        "\"${envOrProp("ECHOCARD_WS_BASE_URL", "echocard.ws.base.url", "ws://120.79.156.134:8081")}\"")
+        "\"${envOrProp("ECHOCARD_WS_BASE_URL", "echocard.ws.base.url", "wss://chat-dev.echocard.com")}\"")
     buildConfigField("String", "FW_SERVER_BASE_URL",
-        "\"${envOrProp("ECHOCARD_FW_SERVER_BASE_URL", "echocard.fw.server.base.url", "http://120.24.162.199/echocard")}\"")
+        "\"${envOrProp("ECHOCARD_FW_SERVER_BASE_URL", "echocard.fw.server.base.url", "https://ota-dev.echocard.com/echocard")}\"")
 }
 
 dependencies {

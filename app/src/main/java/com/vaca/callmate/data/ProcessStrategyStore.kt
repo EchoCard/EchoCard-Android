@@ -24,6 +24,13 @@ data class ProcessStrategyChange(
     val action: String,
 )
 
+/** `load_rules` 成功体：与 v1 规范字段一致 */
+data class ProcessStrategyRuleContent(
+    val tag: String,
+    val name: String,
+    val content: String,
+)
+
 data class ProcessStrategyRule(
     val id: Int,
     val type: String,
@@ -134,6 +141,45 @@ object ProcessStrategyStore {
         val arr = JSONArray(json)
         List(arr.length()) { i -> ProcessStrategyRule.fromJson(arr.getJSONObject(i)) }
     } catch (_: Exception) { null }
+
+    /**
+     * update_config v1 hello：`strategyManifest`；无规则时返回 null（省略键，不传空数组）。
+     */
+    suspend fun strategyManifestJsonArray(context: Context): JSONArray? {
+        ensureDefaultIfNeeded(context)
+        val rules = loadRules(context)
+        if (rules.isEmpty()) return null
+        val arr = JSONArray()
+        for (r in rules) {
+            val desc = r.rule.lineSequence().firstOrNull { it.isNotBlank() }?.take(200).orEmpty()
+            arr.put(
+                JSONObject().apply {
+                    put("id", r.id.toString())
+                    put("name", r.type)
+                    put("description", desc)
+                },
+            )
+        }
+        return arr
+    }
+
+    /**
+     * `load_rules`：tag 与 manifest[].id（规则 id 字符串）或规则 type 精确匹配。
+     */
+    suspend fun getRuleContentForLoadRules(context: Context, tag: String): ProcessStrategyRuleContent? {
+        ensureDefaultIfNeeded(context)
+        val t = tag.trim()
+        if (t.isEmpty()) return null
+        val rules = loadRules(context)
+        val rule = rules.firstOrNull { it.id.toString() == t }
+            ?: rules.firstOrNull { it.type.trim() == t }
+            ?: return null
+        return ProcessStrategyRuleContent(
+            tag = rule.id.toString(),
+            name = rule.type,
+            content = rule.rule,
+        )
+    }
 
     private fun defaultRules(): List<ProcessStrategyRule> = listOf(
         ProcessStrategyRule(1, "外卖/骑手", "处理目标：在不额外暴露信息的前提下，完成交付指引。\n处理要点：1) 不主动提供地址信息 2) 若对方已准确说出地址，仅作确认 3) 给出统一、预设的放置方式"),
