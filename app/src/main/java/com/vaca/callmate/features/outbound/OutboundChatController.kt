@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.vaca.callmate.core.ble.BleManager
 import com.vaca.callmate.core.network.BackendAuthManager
+import com.vaca.callmate.features.calls.SimulationMcuFillerSuppressor
 import com.vaca.callmate.data.AppPreferences
 import com.vaca.callmate.data.ChatMessage
 import com.vaca.callmate.data.Language
@@ -1177,6 +1178,10 @@ class OutboundChatController(
      * `{type:"filler", id}` → MCU 播预加载好的短应答词。不带 sid、不等 ack。
      */
     private fun handleFillerDownlink(json: JSONObject) {
+        if (SimulationMcuFillerSuppressor.shouldSuppressPlayFillerToMcu()) {
+            Log.i(TAG, "ws filler skip MCU: simulation overlay active")
+            return
+        }
         val id = json.optString("id", "").trim()
         if (id.isEmpty()) {
             Log.i(TAG, "ws filler ignored: empty id")

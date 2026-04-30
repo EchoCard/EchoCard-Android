@@ -546,6 +546,10 @@ class LiveCallIncomingWebSocket(
      * → iOS/Android 立刻让 MCU 播本地已预加载的短应答词盖过延迟。不带 sid、不等 ack。
      */
     private fun handleFillerDownlink(json: JSONObject) {
+        if (SimulationMcuFillerSuppressor.shouldSuppressPlayFillerToMcu()) {
+            Log.i(INCOMING_AI_CHAIN_TAG, "live ws filler skip MCU: simulation overlay active")
+            return
+        }
         val id = json.optString("id", "").trim()
         if (id.isEmpty()) {
             Log.i(INCOMING_AI_CHAIN_TAG, "live ws filler ignored: empty id")

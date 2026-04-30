@@ -55,6 +55,7 @@ import com.vaca.callmate.data.CallRecord
 import com.vaca.callmate.data.Language
 import com.vaca.callmate.data.repository.CallRepository
 import com.vaca.callmate.features.calls.SimulationCallController
+import com.vaca.callmate.features.calls.SimulationMcuFillerSuppressor
 import com.vaca.callmate.features.calls.SimulationUiPhase
 import com.vaca.callmate.features.calls.SimDialogMessage
 import com.vaca.callmate.ui.theme.AppBackground
@@ -107,7 +108,15 @@ fun SimulationView(
         )
     }
     DisposableEffect(Unit) {
-        onDispose { controller.dispose() }
+        if (!isPreview) {
+            SimulationMcuFillerSuppressor.enter()
+        }
+        onDispose {
+            if (!isPreview) {
+                SimulationMcuFillerSuppressor.leave()
+            }
+            controller.dispose()
+        }
     }
     LaunchedEffect(Unit) {
         if (isPreview) return@LaunchedEffect
