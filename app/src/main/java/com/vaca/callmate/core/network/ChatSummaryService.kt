@@ -1,8 +1,10 @@
 package com.vaca.callmate.core.network
 
+import android.content.Context
 import android.util.Log
 import com.vaca.callmate.BuildConfig
 import com.vaca.callmate.data.AppPreferences
+import com.vaca.callmate.data.outbound.OutboundTaskJsonStore
 import com.vaca.callmate.data.repository.CallRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -13,6 +15,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
@@ -36,6 +39,7 @@ object ChatSummaryService {
         sessionId: String,
         preferences: AppPreferences,
         repository: CallRepository,
+        appContext: Context? = null,
     ) = withContext(Dispatchers.IO) {
         val sid = sessionId.trim()
         if (sid.isEmpty()) {
@@ -61,7 +65,19 @@ object ChatSummaryService {
             backendSummary = result.summary?.trim()?.takeIf { it.isNotEmpty() },
             tokenCount = result.tokenCount,
             aiDuration = result.duration,
+            structuredOutboundSummaryJson = result.structuredOutboundSummaryJson,
+            outboundOutcome = result.outboundOutcome,
         )
+        val ctx = appContext?.applicationContext
+        if (ctx != null && !result.structuredOutboundSummaryJson.isNullOrBlank()) {
+            val tidStr = repository.getOutboundTaskId(callId)?.trim().orEmpty()
+            if (tidStr.isNotEmpty()) {
+                runCatching {
+                    val uuid = UUID.fromString(tidStr)
+                    OutboundTaskJsonStore.mergeTaskSummary(ctx, uuid, result.structuredOutboundSummaryJson!!)
+                }.onFailure { Log.w(TAG, "merge outbound task summary: ${it.message}") }
+            }
+        }
         Log.i(
             TAG,
             "updated session_id=$sid title=$title identity=${result.identity} tokens=${result.tokenCount} duration=${result.duration}"
@@ -76,6 +92,9 @@ object ChatSummaryService {
         val suggestion: String?,
         val tokenCount: Int?,
         val duration: Int?,
+        /** call_outbound：完整 summary JSON（plan §5.2） */
+        val structuredOutboundSummaryJson: String? = null,
+        val outboundOutcome: String? = null,
     )
 
     private suspend fun pollChatSummary(sessionId: String, preferences: AppPreferences): PollResult? {
@@ -130,6 +149,8 @@ object ChatSummaryService {
                     val cs = item.optJSONObject("chat_summary") ?: continue
                     val t = cs.optString("title", "").trim()
                     if (t.isEmpty()) continue
+                    val outcomeRaw = cs.optString("outcome", "").trim()
+                    val structuredOutbound = buildStructuredOutboundSummary(cs, outcomeRaw)
                     return@withContext PollResult(
                         title = t,
                         identity = cs.optString("identity", "").trim().takeIf { it.isNotEmpty() },
@@ -146,6 +167,8 @@ object ChatSummaryService {
                         } else {
                             null
                         },
+                        structuredOutboundSummaryJson = structuredOutbound?.first,
+                        outboundOutcome = structuredOutbound?.second ?: outcomeRaw.takeIf { it.isNotEmpty() },
                     )
                 }
             }
@@ -153,5 +176,23 @@ object ChatSummaryService {
             Log.w(TAG, "fetch failed auth=${if (useAuth) "on" else "off"}: ${e.message}")
         }
         null
+    }
+
+    /** 若 `chat_summary` 含 `outcome`，组装 plan §5.2 形态 JSON 字符串 */
+    private fun buildStructuredOutboundSummary(cs: JSONObject, outcome: String): Pair<String, String>? {
+        if (outcome.isEmpty()) return null
+        val payload = JSONObject()
+        payload.put("title", cs.optString("title", ""))
+        payload.put("outcome", outcome)
+        payload.put("result", cs.optString("result", ""))
+        payload.put("action_required", cs.optString("action_required", ""))
+        payload.put("summary", cs.optString("summary", ""))
+        val ki = cs.optJSONArray("key_info")
+        if (ki != null) {
+            payload.put("key_info", ki)
+        } else {
+            payload.put("key_info", JSONArray())
+        }
+        return payload.toString() to outcome
     }
 }

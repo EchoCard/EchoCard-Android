@@ -89,6 +89,8 @@ import com.vaca.callmate.ui.theme.AppTextPrimary
 import com.vaca.callmate.ui.theme.AppTextSecondary
 import com.vaca.callmate.ui.theme.AppWarning
 import com.vaca.callmate.ui.theme.CallMateTheme
+import com.vaca.callmate.data.outbound.parseOutboundCallSummaryPayload
+import com.vaca.callmate.ui.screens.outbound.OutboundCallOutcomeCard
 import com.vaca.callmate.ui.preview.PreviewSamples
 import com.vaca.callmate.ui.screens.chat.VoiceRecordingOverlay
 import kotlinx.coroutines.delay
@@ -805,6 +807,18 @@ private fun CallDetailPlaybackTranscriptAnalysis(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        val outboundPayload = remember(call.backendSummary, call.fullSummary, call.isOutbound) {
+            if (!call.isOutbound) null
+            else parseOutboundCallSummaryPayload(call.backendSummary)
+                ?: parseOutboundCallSummaryPayload(call.fullSummary)
+        }
+        if (outboundPayload != null) {
+            OutboundCallOutcomeCard(
+                payload = outboundPayload,
+                language = language,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),

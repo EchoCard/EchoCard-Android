@@ -137,6 +137,30 @@ class OutboundRepository(
         }
 
         /**
+         * 模板头部 JSON 中的 `business_variables`，供 [extractBusinessPrompt] 做 `&{key}` 替换（plan §3.3）。
+         */
+        fun parseBusinessVariables(templateContent: String): Map<String, String> {
+            val marker = templateContent.indexOf("#### ")
+            val header = (if (marker >= 0) templateContent.substring(0, marker) else "").trim()
+            if (header.isEmpty() || !header.startsWith("{")) return emptyMap()
+            return runCatching {
+                val jo = JSONObject(header)
+                val bv = jo.optJSONObject("business_variables") ?: return emptyMap()
+                buildMap {
+                    val keys = bv.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        when (val v = bv.opt(k)) {
+                            JSONObject.NULL -> put(k, "")
+                            is String -> put(k, v)
+                            else -> put(k, v?.toString() ?: "")
+                        }
+                    }
+                }
+            }.getOrElse { emptyMap() }
+        }
+
+        /**
          * 与 iOS `OutboundTemplateStore.extractBusinessPrompt` 对齐（plan spec §3.3）：
          * 跳过 JSON schema 头，取 `#### ` 章节开始的正文，并做 `&{key}` 变量替换。
          */

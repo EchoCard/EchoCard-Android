@@ -11,6 +11,7 @@ import com.vaca.callmate.data.AppPreferences
 import com.vaca.callmate.data.IncomingCall
 import com.vaca.callmate.data.Language
 import com.vaca.callmate.data.ProcessStrategyStore
+import com.vaca.callmate.data.repository.OutboundRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -431,7 +432,8 @@ class LiveCallIncomingWebSocket(
         val initiate: JSONObject
         if (systemCallType == "outbound") {
             scene = "call_outbound"
-            val businessPrompt = com.vaca.callmate.data.repository.OutboundRepository.extractBusinessPrompt(prompt)
+            val bizVars = OutboundRepository.parseBusinessVariables(prompt)
+            val businessPrompt = OutboundRepository.extractBusinessPrompt(prompt, bizVars)
             templateVars.put("business_prompt", businessPrompt)
             val dialCtx = bleManager.outboundDialContextForLive()
             if (dialCtx.targetPhone.isNotEmpty()) templateVars.put("target_phone", dialCtx.targetPhone)

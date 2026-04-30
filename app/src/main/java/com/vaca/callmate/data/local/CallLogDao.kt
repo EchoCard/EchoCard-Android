@@ -60,6 +60,7 @@ interface CallLogDao {
             label = :label,
             fullSummary = :fullSummary,
             backendSummary = :backendSummary,
+            outboundOutcome = :outboundOutcome,
             tokenCount = :tokenCount,
             aiDuration = :aiDuration
         WHERE id = :id
@@ -71,6 +72,7 @@ interface CallLogDao {
         label: String?,
         fullSummary: String?,
         backendSummary: String?,
+        outboundOutcome: String?,
         tokenCount: Int?,
         aiDuration: Int?,
     )

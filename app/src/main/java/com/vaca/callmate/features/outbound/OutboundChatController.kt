@@ -1722,7 +1722,7 @@ class OutboundChatController(
 
     private fun loadScenePrompt(): String? {
         val path = when (wsScene) {
-            ManualWsScene.OUTBOUND_CHAT -> "prompts/outbound_call.txt"
+            ManualWsScene.OUTBOUND_CHAT -> "prompts/outbound_chat.txt"
             ManualWsScene.INIT_CONFIG -> "prompts/init_config.txt"
             ManualWsScene.AI_AVATAR_UPDATE_CONFIG -> "prompts/avatar_update_config.txt"
             ManualWsScene.EVALUATION -> "prompts/config.txt"

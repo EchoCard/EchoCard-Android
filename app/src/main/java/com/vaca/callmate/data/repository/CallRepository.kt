@@ -61,7 +61,9 @@ fun CallLogWithTranscript.toCallRecord(language: Language): CallRecord {
         isImportant = call.isImportant,
         tokenCount = call.tokenCount,
         recordingFileName = call.recordingFileName,
-        wsSessionId = call.wsSessionId
+        wsSessionId = call.wsSessionId,
+        backendSummary = call.backendSummary,
+        outboundOutcome = call.outboundOutcome,
     )
 }
 
@@ -111,6 +113,9 @@ class CallRepository(
     suspend fun getCallLogsForOutboundTask(outboundTaskId: String): List<CallLogWithTranscript> =
         callLogDao.getAllWithTranscriptByOutboundTaskId(outboundTaskId)
 
+    suspend fun getOutboundTaskId(callId: String): String? =
+        callLogDao.getById(callId)?.outboundTaskId
+
     /**
      * 与 iOS 详情页随 `ChatSummaryService` 写库一致：摘要轮询更新后 UI 可刷新。
      */
@@ -149,6 +154,8 @@ class CallRepository(
         backendSummary: String?,
         tokenCount: Int?,
         aiDuration: Int?,
+        structuredOutboundSummaryJson: String? = null,
+        outboundOutcome: String? = null,
     ) {
         val entity = callLogDao.getById(id) ?: return
         val rawSummary = entity.summary ?: ""
@@ -157,7 +164,12 @@ class CallRepository(
         val newLabel = if (!identity.isNullOrEmpty()) identity else entity.label
         /** 与 iOS `ChatSummaryService`：有 result/suggestion 则写入，否则清空 fullSummary */
         val newFull = responseResult?.trim()?.takeIf { it.isNotEmpty() }
-        val newBackend = if (!backendSummary.isNullOrEmpty()) backendSummary else entity.backendSummary
+        val newBackend = when {
+            !structuredOutboundSummaryJson.isNullOrBlank() -> structuredOutboundSummaryJson.trim()
+            !backendSummary.isNullOrEmpty() -> backendSummary
+            else -> entity.backendSummary
+        }
+        val newOutboundOutcome = outboundOutcome?.trim()?.takeIf { it.isNotEmpty() } ?: entity.outboundOutcome
         val newToken = tokenCount?.takeIf { it > 0 } ?: entity.tokenCount
         val newDur = aiDuration?.takeIf { it > 0 } ?: entity.aiDuration
         callLogDao.updateSummaryFromBackend(
@@ -166,6 +178,7 @@ class CallRepository(
             label = newLabel,
             fullSummary = newFull,
             backendSummary = newBackend,
+            outboundOutcome = newOutboundOutcome,
             tokenCount = newToken,
             aiDuration = newDur,
         )

@@ -495,7 +495,8 @@ class CallSessionViewModel : ViewModel(), LiveCallSessionEventSink {
                                 callId = callIdStr,
                                 sessionId = sid,
                                 preferences = prefs,
-                                repository = repo
+                                repository = repo,
+                                appContext = deps.appContext,
                             )
                         }.onFailure { Log.w(TAG, "summary poll: ${it.message}") }
                     }

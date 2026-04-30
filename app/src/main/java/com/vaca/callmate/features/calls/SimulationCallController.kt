@@ -637,7 +637,8 @@ class SimulationCallController(
                                 callId = callId.toString(),
                                 sessionId = sid,
                                 preferences = preferences,
-                                repository = callRepository
+                                repository = callRepository,
+                                appContext = context.applicationContext,
                             )
                         }.onFailure { Log.w(TAG, "chat summary poll: ${it.message}") }
                     }

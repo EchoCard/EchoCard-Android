@@ -43,7 +43,10 @@ data class CallRecord(
     val tokenCount: Int? = null,
     /** 本地录音文件名（位于 [com.vaca.callmate.core.audio.CallRecordingFiles] 目录） */
     val recordingFileName: String? = null,
-    val wsSessionId: String? = null
+    val wsSessionId: String? = null,
+    /** 服务端结构化摘要 JSON（外呼场景可与 plan §5.2 对齐） */
+    val backendSummary: String? = null,
+    val outboundOutcome: String? = null,
 )
 
 enum class MessageSender { Ai, User, System, Caller }

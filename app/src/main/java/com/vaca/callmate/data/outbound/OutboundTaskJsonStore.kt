@@ -5,6 +5,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+private fun JSONObject.optSummaryString(): String? =
+    if (!has("summary") || isNull("summary")) null
+    else optString("summary", "").trim().takeIf { it.isNotEmpty() }
+
 private const val FILE_NAME = "outbound_tasks.json"
 
 object OutboundTaskJsonStore {
@@ -17,6 +21,18 @@ object OutboundTaskJsonStore {
         val arr = JSONArray()
         for (t in tasks) arr.put(taskToJson(t))
         context.filesDir.resolve(FILE_NAME).writeText(arr.toString())
+    }
+
+    /** 通话结束后写入服务端 summary JSON（plan §5、§6.1） */
+    fun mergeTaskSummary(context: Context, taskId: UUID, summaryJson: String): Boolean {
+        val trimmed = summaryJson.trim()
+        if (trimmed.isEmpty()) return false
+        val list = load(context).toMutableList()
+        val i = list.indexOfFirst { it.id == taskId }
+        if (i < 0) return false
+        list[i] = list[i].copy(summary = trimmed)
+        save(context, list)
+        return true
     }
 
     fun load(context: Context): List<OutboundTask> {
@@ -59,6 +75,7 @@ object OutboundTaskJsonStore {
         put("callFrequency", t.callFrequency)
         put("redialMissed", t.redialMissed)
         put("createdAt", t.createdAt)
+        t.summary?.let { put("summary", it) }
     }
 
     private fun jsonToTask(o: JSONObject): OutboundTask {
@@ -78,7 +95,9 @@ object OutboundTaskJsonStore {
         val statusRaw = o.optString("status", "scheduled")
         val status = when (statusRaw.lowercase()) {
             "scheduled" -> OutboundTaskStatus.Scheduled
+            "pending" -> OutboundTaskStatus.Pending
             "running" -> OutboundTaskStatus.Running
+            "not_connected" -> OutboundTaskStatus.NotConnected
             "completed" -> OutboundTaskStatus.Completed
             "partial" -> OutboundTaskStatus.Partial
             "failed" -> OutboundTaskStatus.Failed
@@ -95,6 +114,7 @@ object OutboundTaskJsonStore {
             dialFailureCount = o.optInt("dialFailureCount", 0),
             callFrequency = o.optInt("callFrequency", 30),
             redialMissed = o.optBoolean("redialMissed", false),
+            summary = o.optSummaryString(),
             createdAt = o.getLong("createdAt")
         )
     }

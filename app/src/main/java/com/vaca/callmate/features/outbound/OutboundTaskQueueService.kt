@@ -263,6 +263,7 @@ class OutboundTaskQueueService(
             dialFailureCount = t.dialFailureCount,
             callFrequency = callFrequency?.coerceAtLeast(1) ?: t.callFrequency,
             redialMissed = redialMissed ?: t.redialMissed,
+            summary = t.summary,
             createdAt = t.createdAt
         )
         list[idx] = updated
@@ -381,6 +382,7 @@ class OutboundTaskQueueService(
         o.put("call_frequency", task.callFrequency)
         o.put("redial_missed", task.redialMissed)
         o.put("created_at", Instant.ofEpochMilli(task.createdAt).toString())
+        task.summary?.let { o.put("summary", it) }
         return o
     }
 }
