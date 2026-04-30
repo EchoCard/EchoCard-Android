@@ -148,7 +148,13 @@ class OutboundTaskQueueService(
             waitSlot()
             lastDialAt = System.currentTimeMillis()
             withContext(Dispatchers.Main) {
-                bleManager.prepareOutboundDialContext(taskID, taskSnapshot.promptRule)
+                bleManager.prepareOutboundDialContext(
+                    taskId = taskID,
+                    promptRule = taskSnapshot.promptRule,
+                    targetPhone = contact.phone,
+                    callerName = contact.name,
+                    taskGoal = ""
+                )
                 bleManager.dialPhoneNumber(contact.phone)
             }
             delay(2500)

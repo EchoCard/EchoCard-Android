@@ -426,10 +426,27 @@ class LiveCallIncomingWebSocket(
         templateVars.put("callerType", if (call.isContact) "contact" else "stranger")
         templateVars.put("isContact", call.isContact)
         templateVars.put("systemCallType", systemCallType)
-        val initiate = JSONObject()
-            .put("scene", "call")
-            .put("prompt", prompt)
-            .put("template_vars", templateVars)
+
+        val scene: String
+        val initiate: JSONObject
+        if (systemCallType == "outbound") {
+            scene = "call_outbound"
+            val businessPrompt = com.vaca.callmate.data.repository.OutboundRepository.extractBusinessPrompt(prompt)
+            templateVars.put("business_prompt", businessPrompt)
+            val dialCtx = bleManager.outboundDialContextForLive()
+            if (dialCtx.targetPhone.isNotEmpty()) templateVars.put("target_phone", dialCtx.targetPhone)
+            if (dialCtx.callerName.isNotEmpty()) templateVars.put("callerName", dialCtx.callerName)
+            if (dialCtx.taskGoal.isNotEmpty()) templateVars.put("task_goal", dialCtx.taskGoal)
+            initiate = JSONObject()
+                .put("scene", scene)
+                .put("template_vars", templateVars)
+        } else {
+            scene = "call"
+            initiate = JSONObject()
+                .put("scene", scene)
+                .put("prompt", prompt)
+                .put("template_vars", templateVars)
+        }
         val hello = JSONObject()
             .put("type", "hello")
             .put("audio_params", audioParams)
@@ -437,7 +454,7 @@ class LiveCallIncomingWebSocket(
         ws.send(hello.toString())
         Log.i(
             INCOMING_AI_CHAIN_TAG,
-            "live ws hello sent uid=${call.bleUid} systemCallType=$systemCallType callerType=${if (call.isContact) "contact" else "stranger"}"
+            "live ws hello sent uid=${call.bleUid} scene=$scene systemCallType=$systemCallType callerType=${if (call.isContact) "contact" else "stranger"}"
         )
     }
 

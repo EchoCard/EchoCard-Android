@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         OutboundPromptTemplateEntity::class,
         OutboundContactBookEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -41,6 +41,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `call_log` ADD COLUMN `outboundOutcome` TEXT")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
         fun getDatabase(context: Context): AppDatabase {
@@ -49,7 +55,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "callmate_db"
-                ).addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
             }
         }
     }

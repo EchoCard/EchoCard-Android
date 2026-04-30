@@ -135,5 +135,23 @@ class OutboundRepository(
             if (!typeFromJson.isNullOrBlank()) return typeFromJson
             return "General"
         }
+
+        /**
+         * 与 iOS `OutboundTemplateStore.extractBusinessPrompt` 对齐（plan spec §3.3）：
+         * 跳过 JSON schema 头，取 `#### ` 章节开始的正文，并做 `&{key}` 变量替换。
+         */
+        fun extractBusinessPrompt(
+            templateContent: String,
+            businessVariables: Map<String, String>? = null,
+        ): String {
+            val idx = templateContent.indexOf("#### ")
+            val body = if (idx >= 0) templateContent.substring(idx) else templateContent
+            if (businessVariables.isNullOrEmpty()) return body
+            var result = body
+            for ((key, value) in businessVariables) {
+                result = result.replace("&{$key}", value)
+            }
+            return result
+        }
     }
 }

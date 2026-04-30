@@ -339,6 +339,9 @@ class BleManager(private val context: Context) : BleControlHost {
     data class OutboundDialContext(
         val taskId: UUID?,
         val promptRule: String,
+        val targetPhone: String = "",
+        val callerName: String = "",
+        val taskGoal: String = "",
     )
 
     @Volatile
@@ -356,11 +359,17 @@ class BleManager(private val context: Context) : BleControlHost {
         return c.taskId != null || c.promptRule.trim().isNotEmpty()
     }
 
-    fun prepareOutboundDialContext(taskId: UUID?, promptRule: String) {
-        outboundDialContext = OutboundDialContext(taskId, promptRule)
+    fun prepareOutboundDialContext(
+        taskId: UUID?,
+        promptRule: String,
+        targetPhone: String = "",
+        callerName: String = "",
+        taskGoal: String = "",
+    ) {
+        outboundDialContext = OutboundDialContext(taskId, promptRule, targetPhone, callerName, taskGoal)
         Log.i(
             INCOMING_AI_CHAIN_TAG,
-            "prepareOutboundDialContext taskId=${taskId?.toString() ?: "null"} promptLen=${promptRule.trim().length}"
+            "prepareOutboundDialContext taskId=${taskId?.toString() ?: "null"} promptLen=${promptRule.trim().length} phone=$targetPhone"
         )
     }
 
@@ -370,11 +379,23 @@ class BleManager(private val context: Context) : BleControlHost {
         _outboundLivePresentation.value = false
     }
 
+    fun outboundDialContextForLive(): OutboundDialContext =
+        outboundDialContext ?: OutboundDialContext(null, "")
+
     fun outboundPromptRuleForLive(): String? =
         outboundDialContext?.promptRule?.trim()?.takeIf { it.isNotEmpty() }
 
     fun outboundTaskIdForLive(): String? =
         outboundDialContext?.taskId?.toString()
+
+    fun outboundTargetPhoneForLive(): String? =
+        outboundDialContext?.targetPhone?.takeIf { it.isNotEmpty() }
+
+    fun outboundCallerNameForLive(): String? =
+        outboundDialContext?.callerName?.takeIf { it.isNotEmpty() }
+
+    fun outboundTaskGoalForLive(): String? =
+        outboundDialContext?.taskGoal?.takeIf { it.isNotEmpty() }
 
     /**
      * 与 iOS `CallMateIncomingCall(uid:-1,title:\"[OUTBOUND_TASK]\")` 对齐，供 `call_state(active)` 进 Live。

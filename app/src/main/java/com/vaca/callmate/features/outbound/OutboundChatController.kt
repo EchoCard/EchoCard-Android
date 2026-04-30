@@ -57,7 +57,7 @@ private val WS_URL get() = BuildConfig.WS_BASE_URL
 private const val WS_CLIENT_ID = "CallMate-iOS"
 
 /**
- * 与 iOS `WebSocketScene` 对齐：`outbound_chat`、`init_config`、`update_config`、`evaluation`（通话详情评价等）。
+ * 与 iOS `WebSocketScene` 对齐：`outbound_chat`、`init_config`、`update_config`、`evaluation`、`call_outbound`（真实外呼通话）。
  */
 enum class ManualWsScene {
     OUTBOUND_CHAT,
@@ -65,6 +65,8 @@ enum class ManualWsScene {
     INIT_CONFIG,
     AI_AVATAR_UPDATE_CONFIG,
     EVALUATION,
+    /** 真实外呼通话场景（与 iOS `WebSocketScene.callOutbound` 一致） */
+    CALL_OUTBOUND,
     ;
 
     val serverScene: String
@@ -73,6 +75,7 @@ enum class ManualWsScene {
             INIT_CONFIG -> "init_config"
             AI_AVATAR_UPDATE_CONFIG -> "update_config"
             EVALUATION -> "evaluation"
+            CALL_OUTBOUND -> "call_outbound"
         }
 }
 
@@ -249,6 +252,11 @@ class OutboundChatController(
             } else {
                 "Hi, I'm your AI setup wizard."
             }
+            ManualWsScene.CALL_OUTBOUND -> if (language == Language.Zh) {
+                "AI 外呼已接通，正在执行任务。"
+            } else {
+                "Outbound call connected, executing task."
+            }
         }
         return ChatMessage(1L, MessageSender.Ai, text, isAudio = true, duration = 3)
     }
@@ -413,6 +421,7 @@ class OutboundChatController(
                 ""
             ManualWsScene.EVALUATION ->
                 if (sendAvatarPromptEval) loadEvaluationPrompt().orEmpty() else ""
+            ManualWsScene.CALL_OUTBOUND -> ""
         }
         val updateConfigHelloExtras: UpdateConfigHelloExtras? =
             if (wsScene == ManualWsScene.AI_AVATAR_UPDATE_CONFIG) {
@@ -1717,6 +1726,7 @@ class OutboundChatController(
             ManualWsScene.INIT_CONFIG -> "prompts/init_config.txt"
             ManualWsScene.AI_AVATAR_UPDATE_CONFIG -> "prompts/avatar_update_config.txt"
             ManualWsScene.EVALUATION -> "prompts/config.txt"
+            ManualWsScene.CALL_OUTBOUND -> ""
         }
         return loadAssetText(path)
     }

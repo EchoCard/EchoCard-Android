@@ -186,6 +186,7 @@ class CallRepository(
         recordingFileName: String? = null,
         wsSessionId: String? = null,
         outboundTaskId: String? = null,
+        outboundOutcome: String? = null,
     ) {
         val now = System.currentTimeMillis()
         val entity = CallLogEntity(
@@ -205,6 +206,7 @@ class CallRepository(
             isImportant = null,
             languageRaw = languageRaw,
             outboundTaskId = outboundTaskId,
+            outboundOutcome = outboundOutcome,
             wsSessionId = wsSessionId,
             errorMessage = null,
             tokenCount = null,
@@ -239,6 +241,7 @@ class CallRepository(
         languageRaw: String,
         isSimulation: Boolean = false,
         outboundTaskId: String?,
+        outboundOutcome: String? = null,
         errorMessage: String?
     ) {
         val now = System.currentTimeMillis()
@@ -259,6 +262,7 @@ class CallRepository(
             isImportant = null,
             languageRaw = languageRaw,
             outboundTaskId = outboundTaskId,
+            outboundOutcome = outboundOutcome,
             wsSessionId = null,
             errorMessage = errorMessage,
             tokenCount = null,

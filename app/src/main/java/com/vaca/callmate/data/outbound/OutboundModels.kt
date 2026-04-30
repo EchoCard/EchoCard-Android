@@ -14,7 +14,9 @@ enum class OutboundDialRiskReason {
 
 enum class OutboundTaskStatus {
     Scheduled,
+    Pending,
     Running,
+    NotConnected,
     Completed,
     Partial,
     Failed;
@@ -22,7 +24,9 @@ enum class OutboundTaskStatus {
     /** 与 iOS `OutboundTaskStatus` rawValue 一致，供控制 WS JSON 使用 */
     fun toApiString(): String = when (this) {
         Scheduled -> "scheduled"
+        Pending -> "pending"
         Running -> "running"
+        NotConnected -> "not_connected"
         Completed -> "completed"
         Partial -> "partial"
         Failed -> "failed"
@@ -30,7 +34,9 @@ enum class OutboundTaskStatus {
 
     fun titleZh(): String = when (this) {
         Scheduled -> "已定时"
+        Pending -> "待执行"
         Running -> "执行中"
+        NotConnected -> "未接通"
         Completed -> "已完成"
         Partial -> "部分成功"
         Failed -> "失败"
@@ -38,7 +44,9 @@ enum class OutboundTaskStatus {
 
     fun titleEn(): String = when (this) {
         Scheduled -> "Scheduled"
+        Pending -> "Pending"
         Running -> "Running"
+        NotConnected -> "Not Connected"
         Completed -> "Completed"
         Partial -> "Partial"
         Failed -> "Failed"
@@ -50,7 +58,9 @@ enum class OutboundTaskStatus {
     companion object {
         fun fromApiString(raw: String): OutboundTaskStatus? = when (raw.lowercase()) {
             "scheduled" -> Scheduled
+            "pending" -> Pending
             "running" -> Running
+            "not_connected" -> NotConnected
             "completed" -> Completed
             "partial" -> Partial
             "failed" -> Failed
@@ -76,6 +86,7 @@ data class OutboundTask(
     var dialFailureCount: Int,
     val callFrequency: Int,
     val redialMissed: Boolean,
+    val summary: String? = null,
     val createdAt: Long
 )
 

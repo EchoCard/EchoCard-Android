@@ -24,6 +24,7 @@ data class CallLogEntity(
     val isImportant: Boolean?,
     val languageRaw: String,
     val outboundTaskId: String?,
+    val outboundOutcome: String?,
     val wsSessionId: String?,
     val errorMessage: String?,
     val tokenCount: Int?,
